@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "WenQuanYi Micro Hei", "Noto Sans TC", "PingFang HK", sans-serif;
+  --color-ink: #241c14;
+  --color-paper: #f6f1e7;
+  --color-card: #fffaf3;
+  --color-line: #e6dccb;
+  --color-pine: #1e3a2f;
+  --color-moss: #3f6b54;
+  --color-clay: #d4531c;
+  --color-muted: #6f655b;
+}
+
+html,
+body {
+  background: #d7cfc2;
+}
+
+body {
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+button,
+a,
+input {
+  touch-action: manipulation;
+}
+
+input {
+  font-size: 16px;
+}
+
+@keyframes confetti-fall {
+  0% { transform: translate3d(0, -14vh, 0) rotate(0deg); opacity: 1; }
+  100% { transform: translate3d(var(--dx), 108vh, 0) rotate(var(--spin)); opacity: 0.9; }
+}
+
+.confetti-bit {
+  position: absolute;
+  width: 9px;
+  height: 16px;
+  border-radius: 2px;
+  animation: confetti-fall 2.8s linear infinite;
+}
+
+@keyframes pop-in {
+  0% { transform: scale(0.86); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.pop-in {
+  animation: pop-in 0.28s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .confetti-bit,
+  .pop-in {
+    animation: none;
+  }
+}
