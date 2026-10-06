@@ -373,10 +373,10 @@ export function FloorApp() {
   const status = running ? "進行中" : paused ? "已暫停" : "準備開始";
 
   return (
-    <main className="min-h-dvh bg-void pb-[120px]">
+    <main className={`min-h-dvh bg-void ${run ? "pb-[120px]" : "pb-8"}`}>
       <HeaderBar name={session.workerName} right={nav} />
 
-      <section className="px-4 pt-4">
+      <section className={`px-4 pt-4 ${run ? "" : "flex min-h-[calc(100dvh-92px)] flex-col"}`}>
         <div className="flex flex-wrap gap-2">
           <span className="rounded-xl bg-gold px-3 py-1.5 text-xl font-black text-void">{order.orderNo}</span>
           <span className="rounded-xl bg-go px-3 py-1.5 text-xl font-black text-void">{order.capacity}</span>
@@ -416,6 +416,19 @@ export function FloorApp() {
         {banner && <p className="mt-4 rounded-2xl bg-go px-4 py-3 text-base font-black text-void">{banner}</p>}
 
         {!run && (
+          <div className="flex flex-1 items-center justify-center py-4">
+            <button
+              type="button"
+              onClick={startStep}
+              className="flex h-60 w-60 flex-col items-center justify-center rounded-full bg-go px-5 text-center leading-tight font-black text-void shadow-[0_0_56px_#18d36a99]"
+            >
+              <span className="text-4xl">開始</span>
+              <span className="mt-1 text-2xl">{session.step}</span>
+            </button>
+          </div>
+        )}
+
+        {!run && (
           <div className="mt-4 space-y-2">
             {STEPS.map((step, index) => {
               const active = session.step === step;
@@ -447,12 +460,8 @@ export function FloorApp() {
         )}
       </section>
 
+      {run && (
       <div className="fixed bottom-0 left-1/2 z-30 w-full max-w-[430px] -translate-x-1/2 border-t border-line bg-void p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-        {!run && (
-          <button type="button" onClick={startStep} className="min-h-[72px] w-full rounded-2xl bg-go text-2xl font-black text-void">
-            開始{session.step}
-          </button>
-        )}
         {running && (
           <div className="grid grid-cols-3 gap-2">
             <button type="button" onClick={pause} className="col-span-1 min-h-[72px] rounded-2xl bg-pause px-2 text-lg font-black text-void">
@@ -474,6 +483,7 @@ export function FloorApp() {
           </button>
         )}
       </div>
+      )}
 
       {modal && frozen && (
         <QtyDialog
