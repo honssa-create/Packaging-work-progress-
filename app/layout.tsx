@@ -9,14 +9,14 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#1e3a2f",
+  themeColor: "#07110d",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-Hant">
       <body>
-        <div className="mx-auto min-h-dvh w-full max-w-[430px] bg-paper shadow-2xl">{children}</div>
+        <div className="mx-auto min-h-dvh w-full max-w-[430px] bg-void">{children}</div>
       </body>
     </html>
   );

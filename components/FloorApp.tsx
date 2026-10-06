@@ -2,18 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { Celebrate } from "@/components/Celebrate";
+import { HeaderBar } from "@/components/HeaderBar";
 import { QtyDialog } from "@/components/QtyDialog";
+import { bestFor } from "@/lib/best";
 import { ORDERS, STEPS, findOrder } from "@/lib/orders";
 import { speedLimit } from "@/lib/performance";
 import type { Flavor, Order, PerformanceRating, ProcessStep, ProductionRecord } from "@/lib/types";
-import { formatClock, formatTime, liveNet, livePause, type Run } from "@/lib/time";
+import { formatClock, liveNet, livePause, type Run } from "@/lib/time";
 
 const KEY = "floor-session";
 
 type QtyMap = Record<Flavor, { good: string; defect: string }>;
-
 type Frozen = { startMs: number; endMs: number; netMs: number; pauseMs: number };
-
 type Session = {
   workerId: string;
   workerName: string;
@@ -31,7 +31,7 @@ const RATING_LABEL: Record<PerformanceRating, string> = {
 };
 
 const emptyQty = (order: Order): QtyMap =>
-  Object.fromEntries(order.flavors.map((flavor) => [flavor, { good: "", defect: "" }])) as QtyMap;
+  Object.fromEntries(order.flavors.map((flavor) => [flavor, { good: "0", defect: "0" }])) as QtyMap;
 
 export function FloorApp() {
   const [ready, setReady] = useState(false);
@@ -44,8 +44,9 @@ export function FloorApp() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [banner, setBanner] = useState("");
-  const [cheer, setCheer] = useState<{ secPerItem: number } | null>(null);
+  const [cheer, setCheer] = useState<{ secPerItem: number; yieldRate: number; target: number } | null>(null);
   const [confirmOut, setConfirmOut] = useState(false);
+  const [board, setBoard] = useState<ProductionRecord[]>([]);
 
   useEffect(() => {
     const raw = localStorage.getItem(KEY);
@@ -67,12 +68,19 @@ export function FloorApp() {
 
   const ticking = Boolean(session?.run && (session.run.segmentStart || session.run.pauseStart));
   useEffect(() => {
-    if (!ticking) return;
-    const id = setInterval(() => setNow(Date.now()), 250);
+    if (!session) return;
+    const id = setInterval(() => setNow(Date.now()), ticking ? 250 : 1000);
     return () => clearInterval(id);
-  }, [ticking]);
+  }, [session, ticking]);
 
-  if (!ready) return <main className="min-h-dvh bg-paper" />;
+  useEffect(() => {
+    fetch("/api/records")
+      .then((res) => res.json())
+      .then((rows: ProductionRecord[]) => setBoard(Array.isArray(rows) ? rows : []))
+      .catch(() => {});
+  }, [cheer, banner]);
+
+  if (!ready) return <main className="min-h-dvh bg-void" />;
 
   const order = session?.orderNo ? findOrder(session.orderNo) : undefined;
 
@@ -102,9 +110,7 @@ export function FloorApp() {
   function selectOrder(next: Order) {
     setBanner("");
     setSession((current) =>
-      current
-        ? { ...current, orderNo: next.orderNo, step: "抹樽", done: [], run: null }
-        : current,
+      current ? { ...current, orderNo: next.orderNo, step: "抹樽", done: [], run: null } : current,
     );
   }
 
@@ -139,12 +145,7 @@ export function FloorApp() {
       if (!current || !run?.segmentStart) return current;
       return {
         ...current,
-        run: {
-          ...run,
-          netMs: liveNet(run, t),
-          segmentStart: null,
-          pauseStart: t,
-        },
+        run: { ...run, netMs: liveNet(run, t), segmentStart: null, pauseStart: t },
       };
     });
     setNow(t);
@@ -157,12 +158,7 @@ export function FloorApp() {
       if (!current || !run?.pauseStart) return current;
       return {
         ...current,
-        run: {
-          ...run,
-          pauseMs: livePause(run, t),
-          pauseStart: null,
-          segmentStart: t,
-        },
+        run: { ...run, pauseMs: livePause(run, t), pauseStart: null, segmentStart: t },
       };
     });
     setNow(t);
@@ -207,11 +203,6 @@ export function FloorApp() {
         },
       };
     });
-  }
-
-  function abandon() {
-    setModal(false);
-    setSession((current) => (current ? { ...current, run: null } : current));
   }
 
   async function submit() {
@@ -261,7 +252,11 @@ export function FloorApp() {
       setModal(false);
       if (saved.performanceRating === "EXCELLENT") {
         navigator.vibrate?.([30, 40, 30]);
-        setCheer({ secPerItem: saved.secPerItem });
+        setCheer({
+          secPerItem: saved.secPerItem,
+          yieldRate: saved.yieldRate,
+          target: speedLimit(order.capacity),
+        });
         setBanner("");
       } else {
         setBanner(`已記錄 ${finished} · ${saved.secPerItem.toFixed(2)} 秒/件 · ${RATING_LABEL[saved.performanceRating]}`);
@@ -273,78 +268,97 @@ export function FloorApp() {
     }
   }
 
+  const nav = session ? (
+    <div className="flex gap-2">
+      <a href="/records" className="inline-flex min-h-10 items-center rounded-full bg-gold px-4 text-sm font-black text-void">
+        紀錄榜
+      </a>
+      <button
+        type="button"
+        onClick={() => (session.run ? setConfirmOut(true) : clockOut())}
+        className="min-h-10 rounded-full bg-danger px-4 text-sm font-black text-white"
+      >
+        放工
+      </button>
+    </div>
+  ) : (
+    <a href="/records" className="inline-flex min-h-10 items-center rounded-full bg-gold px-4 text-sm font-black text-void">
+      紀錄榜
+    </a>
+  );
+
   if (!session) {
     return (
-      <main className="flex min-h-dvh flex-col justify-between px-5 py-8">
-        <div>
-          <p className="text-xs font-bold tracking-[0.28em] text-moss">PACK LINE</p>
-          <h1 className="mt-3 text-[2.6rem] leading-none font-black">
-            包裝工序
-            <br />
-            追蹤
-          </h1>
-          <p className="mt-4 text-base leading-7 text-muted">返工後揀訂單，跟住抹樽、貼貼紙、包裝入箱。</p>
+      <main className="flex min-h-dvh flex-col bg-void">
+        <HeaderBar name="PACK LINE" right={nav} />
+        <div className="flex flex-1 flex-col justify-between px-5 py-8">
+          <div>
+            <p className="text-sm font-black tracking-[0.35em] text-go">LIVE SHIFT</p>
+            <h1 className="mt-3 text-5xl leading-none font-black text-gold">
+              包裝
+              <br />
+              挑戰
+            </h1>
+            <p className="mt-4 text-lg font-bold leading-7 text-muted">打卡開波，揀單，打破每件秒數紀錄。</p>
+          </div>
+          <form onSubmit={clockIn} className="space-y-3">
+            <label className="block">
+              <span className="text-base font-black">你的名字</span>
+              <input
+                value={name}
+                onChange={(event) => setName(event.target.value.slice(0, 40))}
+                placeholder="例如：阿明"
+                autoComplete="name"
+                className="mt-2 h-16 w-full rounded-2xl border-2 border-line bg-panel px-4 text-xl font-bold outline-none focus:border-go"
+              />
+            </label>
+            <button
+              type="submit"
+              disabled={!name.trim()}
+              className="min-h-[72px] w-full rounded-2xl bg-go text-2xl font-black text-void disabled:opacity-40"
+            >
+              返工打卡
+            </button>
+          </form>
         </div>
-        <form onSubmit={clockIn} className="space-y-3">
-          <label className="block">
-            <span className="text-sm font-bold">你的名字</span>
-            <input
-              value={name}
-              onChange={(event) => setName(event.target.value.slice(0, 40))}
-              placeholder="例如：阿明"
-              autoComplete="name"
-              className="mt-2 h-14 w-full rounded-2xl border border-line bg-card px-4 text-lg outline-none focus:border-pine"
-            />
-          </label>
-          <button
-            type="submit"
-            disabled={!name.trim()}
-            className="min-h-16 w-full rounded-2xl bg-pine text-xl font-bold text-white disabled:opacity-40"
-          >
-            返工打卡
-          </button>
-          <a href="/records" className="block py-2 text-center text-sm font-bold text-moss">
-            查看生產紀錄
-          </a>
-        </form>
       </main>
     );
   }
 
   if (!order) {
     return (
-      <main className="min-h-dvh px-4 pt-5 pb-8">
-        <Header
-          name={session.workerName}
-          clockIn={session.clockIn}
-          onClockOut={() => clockOut()}
-        />
-        <h1 className="mt-5 text-3xl font-black">選擇訂單</h1>
-        <p className="mt-1 text-sm text-muted">ClickUp 示範訂單 · 25g / 45g 優秀線 5 秒 · 75g 為 7 秒</p>
-        <ul className="mt-4 space-y-3">
-          {ORDERS.map((item) => (
-            <li key={item.orderNo}>
-              <button
-                type="button"
-                onClick={() => selectOrder(item)}
-                className="w-full rounded-3xl border border-line bg-card p-4 text-left active:scale-[0.99]"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xl font-black">{item.orderNo}</span>
-                  <CapacityTag capacity={item.capacity} />
-                </div>
-                <p className="mt-1 text-sm text-muted">
-                  {item.product} · 計劃 {item.planQty}
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {item.flavors.map((flavor) => (
-                    <FlavorChip key={flavor} flavor={flavor} />
-                  ))}
-                </div>
-              </button>
-            </li>
-          ))}
-        </ul>
+      <main className="min-h-dvh bg-void pb-8">
+        <HeaderBar name={session.workerName} right={nav} />
+        <div className="px-4 pt-5">
+          <h1 className="text-3xl font-black">選擇關卡</h1>
+          <p className="mt-1 text-base font-bold text-muted">25g / 45g 目標 5 秒 · 75g 目標 7 秒</p>
+          <ul className="mt-4 space-y-3">
+            {ORDERS.map((item) => (
+              <li key={item.orderNo}>
+                <button
+                  type="button"
+                  onClick={() => selectOrder(item)}
+                  className="w-full rounded-3xl bg-panel p-4 text-left"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-xl bg-gold px-3 py-1 text-lg font-black text-void">{item.orderNo}</span>
+                    <span className="rounded-xl bg-go px-3 py-1 text-lg font-black text-void">{item.capacity}</span>
+                  </div>
+                  <p className="mt-2 text-base font-bold text-muted">
+                    {item.product} · 計劃 {item.planQty}
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {item.flavors.map((flavor) => (
+                      <span key={flavor} className="rounded-full bg-void px-3 py-1 text-sm font-black">
+                        {flavor}
+                      </span>
+                    ))}
+                  </div>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       </main>
     );
   }
@@ -354,97 +368,109 @@ export function FloorApp() {
   const paused = Boolean(run?.pauseStart);
   const net = run ? liveNet(run, now) : 0;
   const pausedMs = run ? livePause(run, now) : 0;
+  const best = bestFor(board, run?.step ?? session.step, order.capacity);
+  const title = run ? `${run.step}中` : session.step;
+  const status = running ? "進行中" : paused ? "已暫停" : "準備開始";
 
   return (
-    <main className="flex min-h-dvh flex-col px-4 pt-5 pb-6">
-      <Header
-        name={session.workerName}
-        clockIn={session.clockIn}
-        onClockOut={() => (run ? setConfirmOut(true) : clockOut())}
-      />
+    <main className="min-h-dvh bg-void pb-[120px]">
+      <HeaderBar name={session.workerName} right={nav} />
 
-      <section className="mt-4 rounded-3xl border border-line bg-card p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-2xl font-black">{order.orderNo}</p>
-            <p className="text-sm text-muted">
-              {order.product} · 計劃 {order.planQty}
+      <section className="px-4 pt-4">
+        <div className="flex flex-wrap gap-2">
+          <span className="rounded-xl bg-gold px-3 py-1.5 text-xl font-black text-void">{order.orderNo}</span>
+          <span className="rounded-xl bg-go px-3 py-1.5 text-xl font-black text-void">{order.capacity}</span>
+        </div>
+        <p className="mt-2 text-base font-bold text-muted">
+          {order.product} · {order.flavors.join(" / ")}
+        </p>
+        <p className="mt-1 text-base font-black text-gold">
+          目標 {speedLimit(order.capacity)} 秒/件
+          {best ? ` · 最佳 ${best.secPerItem.toFixed(2)}` : " · 挑戰第一名"}
+        </p>
+
+        <div className="mt-5 text-center">
+          <p className="text-5xl leading-none font-black">{title}</p>
+          <span
+            className={`mt-3 inline-flex min-h-10 items-center rounded-full px-4 text-base font-black ${
+              running ? "bg-go text-void" : paused ? "bg-pause text-void" : "bg-panel text-ink"
+            }`}
+          >
+            {running && <span className="live-dot mr-2 h-2.5 w-2.5 rounded-full bg-void" />}
+            {status}
+          </span>
+        </div>
+
+        {run && (
+          <div className="mt-6 rounded-[28px] border-2 border-go bg-panel px-3 py-6 text-center">
+            <p className="text-sm font-black tracking-[0.3em] text-muted">NET TIME</p>
+            <p className="mt-1 font-mono text-5xl font-black tracking-tight tabular-nums">{formatClock(net)}</p>
+            <p className="mt-3 text-base font-bold text-pause">暫停 {formatClock(pausedMs)}</p>
+            <p className="mt-2 text-base font-black text-gold">
+              目標 {speedLimit(order.capacity)} 秒/件
+              {best ? ` · 最佳 ${best.secPerItem.toFixed(2)}` : " · 挑戰第一名"}
             </p>
           </div>
-          <CapacityTag capacity={order.capacity} />
-        </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {order.flavors.map((flavor) => (
-            <FlavorChip key={flavor} flavor={flavor} />
-          ))}
-        </div>
-        <p className="mt-3 text-sm font-semibold text-moss">優秀線 ≤ {speedLimit(order.capacity)} 秒/件（計淨工時）</p>
-      </section>
+        )}
 
-      {!run && (
-        <div className="mt-4 space-y-2">
-          {STEPS.map((step, index) => {
-            const active = session.step === step;
-            const done = session.done.includes(step);
-            return (
-              <button
-                key={step}
-                type="button"
-                onClick={() => pickStep(step)}
-                className={`flex min-h-14 w-full items-center justify-between rounded-2xl px-4 text-left text-base font-bold ${
-                  active ? "bg-pine text-white" : "bg-card text-ink"
-                }`}
-              >
-                <span>
-                  {index + 1}. {step}
-                </span>
-                <span>{done ? "✓" : active ? "現在" : ""}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      <div className="mt-6 flex flex-1 flex-col">
-        {banner && <p className="mb-3 rounded-2xl bg-emerald-100 px-4 py-3 text-sm font-semibold text-emerald-900">{banner}</p>}
+        {banner && <p className="mt-4 rounded-2xl bg-go px-4 py-3 text-base font-black text-void">{banner}</p>}
 
         {!run && (
-          <button type="button" onClick={startStep} className="min-h-20 w-full rounded-3xl bg-pine px-4 text-2xl leading-tight font-black text-white">
+          <div className="mt-4 space-y-2">
+            {STEPS.map((step, index) => {
+              const active = session.step === step;
+              const done = session.done.includes(step);
+              return (
+                <button
+                  key={step}
+                  type="button"
+                  onClick={() => pickStep(step)}
+                  className={`flex min-h-16 w-full items-center justify-between rounded-2xl px-4 text-left text-lg font-black ${
+                    active ? "bg-go text-void" : "bg-panel"
+                  }`}
+                >
+                  <span>
+                    {index + 1}. {step}
+                  </span>
+                  <span>{done ? "CLEAR" : active ? "NOW" : ""}</span>
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => setSession({ ...session, orderNo: null, run: null })}
+              className="w-full py-3 text-base font-black text-muted"
+            >
+              換一張訂單
+            </button>
+          </div>
+        )}
+      </section>
+
+      <div className="fixed bottom-0 left-1/2 z-30 w-full max-w-[430px] -translate-x-1/2 border-t border-line bg-void p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        {!run && (
+          <button type="button" onClick={startStep} className="min-h-[72px] w-full rounded-2xl bg-go text-2xl font-black text-void">
             開始{session.step}
           </button>
         )}
-
-        {run && (
-          <>
-            <div className="text-center">
-              <p className="text-sm font-bold text-muted">{running ? "淨工時計時中" : paused ? "已暫停" : "等待確認"}</p>
-              <p className="mt-1 font-mono text-6xl font-black tracking-tight tabular-nums">{formatClock(net)}</p>
-              <p className="mt-1 text-sm text-muted">暫停 {formatClock(pausedMs)}</p>
-            </div>
-            <div className="mt-auto space-y-3 pt-6">
-              {running && (
-                <button type="button" onClick={pause} className="min-h-16 w-full rounded-2xl bg-[#efe4d4] px-3 text-lg leading-snug font-bold">
-                  暫停（食飯/補料/洗手間）
-                </button>
-              )}
-              {paused && (
-                <button type="button" onClick={resume} className="min-h-16 w-full rounded-2xl bg-moss text-lg font-bold text-white">
-                  繼續工作
-                </button>
-              )}
-              <button type="button" onClick={openComplete} className="min-h-16 w-full rounded-2xl bg-clay text-xl font-black text-white">
-                完成{run.step}
-              </button>
-              <button type="button" onClick={abandon} className="w-full py-2 text-sm font-bold text-muted">
-                放棄這道工序
-              </button>
-            </div>
-          </>
+        {running && (
+          <div className="grid grid-cols-3 gap-2">
+            <button type="button" onClick={pause} className="col-span-1 min-h-[72px] rounded-2xl bg-pause px-2 text-lg font-black text-void">
+              暫停
+            </button>
+            <button type="button" onClick={openComplete} className="col-span-2 min-h-[72px] rounded-2xl bg-go text-xl font-black text-void">
+              完成工序
+            </button>
+          </div>
         )}
-
-        {!run && (
-          <button type="button" onClick={() => setSession({ ...session, orderNo: null, run: null })} className="mt-auto py-3 text-sm font-bold text-moss">
-            換一張訂單
+        {paused && (
+          <button type="button" onClick={resume} className="min-h-[72px] w-full rounded-2xl bg-resume text-2xl font-black text-white">
+            繼續工作
+          </button>
+        )}
+        {run && !running && !paused && (
+          <button type="button" onClick={openComplete} className="min-h-[72px] w-full rounded-2xl bg-go text-xl font-black text-void">
+            完成工序
           </button>
         )}
       </div>
@@ -458,24 +484,33 @@ export function FloorApp() {
           qty={qty}
           busy={busy}
           error={error}
-          onChange={(flavor, field, value) => setQty((current) => ({ ...current, [flavor]: { ...current[flavor], [field]: value } }))}
+          onChange={(flavor, field, value) =>
+            setQty((current) => ({ ...current, [flavor]: { ...current[flavor], [field]: value } }))
+          }
           onCancel={closeComplete}
           onSubmit={submit}
         />
       )}
 
-      {cheer && <Celebrate secPerItem={cheer.secPerItem} onClose={() => setCheer(null)} />}
+      {cheer && (
+        <Celebrate
+          secPerItem={cheer.secPerItem}
+          yieldRate={cheer.yieldRate}
+          target={cheer.target}
+          onClose={() => setCheer(null)}
+        />
+      )}
 
       {confirmOut && (
-        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/45">
-          <div className="w-full max-w-[430px] rounded-t-3xl bg-card p-5">
-            <h2 className="text-xl font-black">工序尚未完成</h2>
-            <p className="mt-2 text-sm text-muted">放工會放棄今次計時，不會寫入紀錄。</p>
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/70">
+          <div className="w-full max-w-[430px] rounded-t-3xl bg-panel p-5">
+            <h2 className="text-2xl font-black">工序尚未完成</h2>
+            <p className="mt-2 text-base font-bold text-muted">放工會放棄今次計時。</p>
             <div className="mt-5 grid grid-cols-2 gap-3">
-              <button type="button" onClick={() => setConfirmOut(false)} className="min-h-14 rounded-2xl bg-paper font-bold">
+              <button type="button" onClick={() => setConfirmOut(false)} className="min-h-16 rounded-2xl bg-go font-black text-void">
                 繼續做
               </button>
-              <button type="button" onClick={clockOut} className="min-h-14 rounded-2xl bg-ink font-bold text-white">
+              <button type="button" onClick={clockOut} className="min-h-16 rounded-2xl bg-danger font-black text-white">
                 仍要放工
               </button>
             </div>
@@ -484,33 +519,4 @@ export function FloorApp() {
       )}
     </main>
   );
-}
-
-function Header({ name, clockIn, onClockOut }: { name: string; clockIn: string; onClockOut: () => void }) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-lg font-black">{name}</p>
-        <p className="text-xs text-muted">返工 {formatTime(clockIn)}</p>
-      </div>
-      <div className="flex items-center gap-2">
-        <a href="/records" className="rounded-full bg-card px-3 py-2 text-sm font-bold">
-          紀錄
-        </a>
-        <button type="button" onClick={onClockOut} className="min-h-11 rounded-full bg-ink px-4 text-sm font-bold text-white">
-          放工打卡
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function CapacityTag({ capacity }: { capacity: Order["capacity"] }) {
-  const tone = capacity === "75g" ? "bg-rose-100 text-rose-900" : capacity === "45g" ? "bg-amber-100 text-amber-950" : "bg-emerald-100 text-emerald-900";
-  return <span className={`rounded-full px-3 py-1 text-sm font-black ${tone}`}>{capacity}</span>;
-}
-
-function FlavorChip({ flavor }: { flavor: Flavor }) {
-  const tone = flavor === "冰糖" ? "bg-amber-50 text-amber-900" : flavor === "桂花" ? "bg-lime-50 text-lime-900" : "bg-red-50 text-red-900";
-  return <span className={`rounded-full px-3 py-1 text-sm font-bold ${tone}`}>{flavor}</span>;
 }

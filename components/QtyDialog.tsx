@@ -4,7 +4,54 @@ import { speedLimit, summarize } from "@/lib/performance";
 import type { Flavor, Order } from "@/lib/types";
 import { formatDuration } from "@/lib/time";
 
-const RATING_LABEL = { EXCELLENT: "太優秀", GOOD: "良好", NORMAL: "一般" };
+function bump(value: string, delta: number) {
+  return String(Math.max(0, Math.min(99999, Number(value || 0) + delta)));
+}
+
+function Stepper({
+  label,
+  value,
+  warn,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  warn?: boolean;
+  onChange: (next: string) => void;
+}) {
+  return (
+    <div className={warn ? "rounded-2xl bg-[#3a1515] p-3" : ""}>
+      <p className={`text-base font-black ${warn ? "text-danger" : "text-void"}`}>{label}</p>
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onChange(bump(value, -1))}
+          className="h-16 w-16 shrink-0 rounded-2xl bg-void text-3xl font-black text-ink"
+        >
+          −
+        </button>
+        <input
+          type="number"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          min={0}
+          value={value}
+          onChange={(event) => onChange(event.target.value.replace(/\D/g, "").slice(0, 5) || "0")}
+          className={`h-16 min-w-0 flex-1 rounded-2xl border-2 bg-void text-center text-3xl font-black tabular-nums outline-none ${
+            warn ? "border-danger text-danger" : "border-go text-ink"
+          }`}
+        />
+        <button
+          type="button"
+          onClick={() => onChange(bump(value, 1))}
+          className="h-16 w-16 shrink-0 rounded-2xl bg-go text-3xl font-black text-void"
+        >
+          +
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export function QtyDialog({
   order,
@@ -38,65 +85,71 @@ export function QtyDialog({
   const total = preview.totalGoodQty + preview.totalDefectQty;
 
   return (
-    <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/45">
+    <div className="fixed inset-0 z-40 flex justify-center bg-black/70">
       <form
-        className="max-h-[92dvh] w-full max-w-[430px] overflow-y-auto rounded-t-3xl bg-card px-5 pt-5 pb-6 shadow-2xl"
+        className="flex h-dvh w-full max-w-[430px] flex-col bg-void"
         onSubmit={(event) => {
           event.preventDefault();
           onSubmit();
         }}
       >
-        <p className="text-sm text-muted">完成{stepLabel}</p>
-        <h2 className="mt-1 text-2xl font-black">填寫數量</h2>
-        <p className="mt-1 text-sm text-muted">
-          {order.orderNo} · {order.capacity} · 只顯示此單味道
-        </p>
-        <p className="mt-3 rounded-2xl bg-paper px-4 py-3 text-sm">
-          淨工時 {formatDuration(netSeconds)} · 暫停 {formatDuration(pausedSeconds)}
-          <br />
-          優秀線 ≤ {limit} 秒/件
-          {total > 0 && (
-            <>
-              {" "}
-              · 預計 {preview.secPerItem.toFixed(2)} 秒/件 · {RATING_LABEL[preview.performanceRating]}
-            </>
-          )}
-        </p>
-
-        <div className="mt-4 space-y-3">
-          {order.flavors.map((flavor) => (
-            <fieldset key={flavor} className="rounded-2xl border border-line p-3">
-              <legend className="px-1 text-lg font-bold">{flavor}</legend>
-              <div className="grid grid-cols-2 gap-3">
-                {(["good", "defect"] as const).map((field) => (
-                  <label key={field} className="block">
-                    <span className="text-sm text-muted">{field === "good" ? "良品" : "次品"}</span>
-                    <input
-                      inputMode="numeric"
-                      value={qty[flavor]?.[field] ?? ""}
-                      onChange={(event) => onChange(flavor, field, event.target.value.replace(/\D/g, "").slice(0, 5))}
-                      className="mt-1 h-14 w-full rounded-xl border border-line bg-white text-center text-2xl font-bold outline-none focus:border-pine"
-                      placeholder="0"
-                    />
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-          ))}
-        </div>
-
-        {error && <p className="mt-3 text-sm font-medium text-clay">{error}</p>}
-
-        <div className="mt-5 grid grid-cols-[0.7fr_1.3fr] gap-3">
-          <button type="button" onClick={onCancel} className="min-h-14 rounded-2xl bg-paper text-lg font-bold">
+        <div className="flex items-center justify-between border-b border-line px-4 py-3">
+          <div>
+            <p className="text-sm font-bold text-muted">完成{stepLabel}</p>
+            <h2 className="text-2xl font-black">填寫數量</h2>
+          </div>
+          <button type="button" onClick={onCancel} className="min-h-12 rounded-2xl bg-panel px-4 text-base font-black">
             返回
           </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-4 py-4">
+          <div className="flex flex-wrap gap-2">
+            <span className="rounded-xl bg-gold px-3 py-1 text-lg font-black text-void">{order.orderNo}</span>
+            <span className="rounded-xl bg-go px-3 py-1 text-lg font-black text-void">{order.capacity}</span>
+          </div>
+          <p className="mt-3 rounded-2xl bg-panel px-4 py-3 text-base font-bold">
+            淨工時 {formatDuration(netSeconds)} · 暫停 {formatDuration(pausedSeconds)}
+            <br />
+            目標 ≤ {limit} 秒/件
+            {total > 0 && (
+              <>
+                <br />
+                預計 {preview.secPerItem.toFixed(1)} 秒/件 · 良品率 {preview.yieldRate}%
+              </>
+            )}
+          </p>
+
+          <div className="mt-4 space-y-3">
+            {order.flavors.map((flavor) => (
+              <article key={flavor} className="rounded-3xl bg-white p-4 text-void">
+                <h3 className="text-2xl font-black">{flavor}</h3>
+                <div className="mt-3 space-y-3">
+                  <Stepper
+                    label="良品"
+                    value={qty[flavor]?.good ?? "0"}
+                    onChange={(value) => onChange(flavor, "good", value)}
+                  />
+                  <Stepper
+                    label="次品"
+                    warn
+                    value={qty[flavor]?.defect ?? "0"}
+                    onChange={(value) => onChange(flavor, "defect", value)}
+                  />
+                </div>
+              </article>
+            ))}
+          </div>
+          {error && <p className="mt-3 text-base font-black text-danger">{error}</p>}
+        </div>
+
+        <div className="border-t border-line p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <button
             type="submit"
             disabled={busy || total === 0}
-            className="min-h-14 rounded-2xl bg-clay text-lg font-bold text-white disabled:opacity-40"
+            className="min-h-[72px] w-full rounded-2xl bg-go text-2xl font-black text-void disabled:bg-line disabled:text-muted disabled:opacity-100"
           >
-            {busy ? "提交中…" : "確認提交"}
+            {busy ? "提交中…" : "確認提交並結算"}
           </button>
         </div>
       </form>
